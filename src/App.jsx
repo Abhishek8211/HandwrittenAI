@@ -1,6 +1,6 @@
 import { useState } from "react";
 import Sidebar from "./components/layout/Sidebar";
-import InteractiveCanvas from "./components/editor/InteractiveCanvas";
+import EnhancedCanvas from "./components/editor/EnhancedCanvas";
 import { useHandwritingSettings } from "./hooks/useHandwritingSettings";
 
 function App() {
@@ -36,7 +36,7 @@ function App() {
       />
 
       <div className="flex-1 overflow-auto">
-        <InteractiveCanvas
+        <EnhancedCanvas
           paperStyle={settings.paperStyle}
           font={settings.font}
           inkColor={settings.inkColor}

@@ -49,6 +49,7 @@ const InteractiveCanvas = ({
   const [isDraggingImage, setIsDraggingImage] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
+  // Initialize
   useEffect(() => {
     setPaperSize(pageSize);
   }, [pageSize]);
@@ -58,6 +59,14 @@ const InteractiveCanvas = ({
       setImageData(uploadedDiagram);
     }
   }, [uploadedDiagram]);
+
+  useEffect(() => {
+    setCurrentFontSize(globalFontSize);
+  }, [globalFontSize]);
+
+  useEffect(() => {
+    setCurrentInkColor(inkColor);
+  }, [inkColor]);
 
   // Calculate scale
   useEffect(() => {

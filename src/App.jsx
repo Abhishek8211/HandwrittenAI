@@ -37,6 +37,7 @@ function App() {
 
       <div className="flex-1 overflow-auto">
         <EnhancedCanvas
+          text={text}
           paperStyle={settings.paperStyle}
           font={settings.font}
           inkColor={settings.inkColor}

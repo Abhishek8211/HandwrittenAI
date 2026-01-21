@@ -1,5 +1,4 @@
 import React from "react";
-import { motion } from "framer-motion";
 import {
   Upload,
   FileText,
@@ -548,4 +547,4 @@ const Sidebar = ({
   );
 };
 
-export default Sidebar;
+export default React.memo(Sidebar);

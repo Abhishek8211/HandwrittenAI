@@ -1,7 +1,16 @@
 import React, { useRef, useEffect, useState } from "react";
-import { 
-  Download, FileDown, Trash2, Move, Undo2, Redo2, 
-  Type, Palette, Plus, Check, X 
+import {
+  Download,
+  FileDown,
+  Trash2,
+  Move,
+  Undo2,
+  Redo2,
+  Type,
+  Palette,
+  Plus,
+  Check,
+  X,
 } from "lucide-react";
 import {
   PAPER_CONFIG,
@@ -23,6 +32,7 @@ import {
  * - Cursor preview
  */
 const EnhancedCanvas = ({
+  text: initialText = "",
   paperStyle,
   font,
   inkColor,
@@ -40,32 +50,48 @@ const EnhancedCanvas = ({
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
   const floatingInputRef = useRef(null);
-  
+  const initialTextRendered = useRef(false);
+
   const [scale, setScale] = useState(1);
   const [textBlocks, setTextBlocks] = useState([]);
   const [history, setHistory] = useState([[]]);
   const [historyIndex, setHistoryIndex] = useState(0);
-  
+
   // Active input state
   const [isInputActive, setIsInputActive] = useState(false);
   const [inputPosition, setInputPosition] = useState({ x: 0, y: 0 });
   const [inputText, setInputText] = useState("");
   const [currentBlockId, setCurrentBlockId] = useState(null);
   const [clickedPosition, setClickedPosition] = useState(null);
-  
+  const [isDraggingInput, setIsDraggingInput] = useState(false);
+  const [dragStartPos, setDragStartPos] = useState({ x: 0, y: 0 });
+
   // Cursor preview
   const [cursorPreview, setCursorPreview] = useState(null);
-  
+
   // Current settings
   const [currentFontSize, setCurrentFontSize] = useState(globalFontSize);
   const [currentInkColor, setCurrentInkColor] = useState(inkColor);
-  
+
   // Image state
   const [imageData, setImageData] = useState(null);
   const [imagePosition, setImagePosition] = useState({ x: 400, y: 300 });
   const [imageSize, setImageSize] = useState({ width: 200, height: 200 });
   const [isDraggingImage, setIsDraggingImage] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const mouseMoveTimeoutRef = useRef(null);
+
+  // Throttle helper to reduce lag
+  const throttle = (func, delay) => {
+    return (...args) => {
+      if (!mouseMoveTimeoutRef.current) {
+        func(...args);
+        mouseMoveTimeoutRef.current = setTimeout(() => {
+          mouseMoveTimeoutRef.current = null;
+        }, delay);
+      }
+    };
+  };
 
   // Initialize
   useEffect(() => {
@@ -85,6 +111,24 @@ const EnhancedCanvas = ({
   useEffect(() => {
     setCurrentInkColor(inkColor);
   }, [inkColor]);
+
+  // Initialize with sidebar text if provided
+  useEffect(() => {
+    if (initialText && initialText.trim() && !initialTextRendered.current) {
+      const initialBlock = {
+        id: 1,
+        x: PAPER_CONFIG.MARGIN_LEFT + 10,
+        y: PAPER_CONFIG.MARGIN_TOP,
+        text: initialText,
+        fontSize: globalFontSize,
+        color: inkColor,
+      };
+      setTextBlocks([initialBlock]);
+      setHistory([[initialBlock]]);
+      setHistoryIndex(0);
+      initialTextRendered.current = true;
+    }
+  }, [initialText, globalFontSize, inkColor]);
 
   // Calculate scale
   useEffect(() => {
@@ -106,10 +150,18 @@ const EnhancedCanvas = ({
   // Font name mapper
   const getFontName = (fontId) => {
     const fontMap = {
-      caveat: "Caveat", indieflower: "Indie Flower", shadows: "Shadows Into Light",
-      kalam: "Kalam", architects: "Architects Daughter", nothing: "Nothing You Could Do",
-      handlee: "Handlee", covered: "Covered By Your Grace", amatic: "Amatic SC",
-      gochi: "Gochi Hand", schoolbell: "Schoolbell", waiting: "Waiting for the Sunrise",
+      caveat: "Caveat",
+      indieflower: "Indie Flower",
+      shadows: "Shadows Into Light",
+      kalam: "Kalam",
+      architects: "Architects Daughter",
+      nothing: "Nothing You Could Do",
+      handlee: "Handlee",
+      covered: "Covered By Your Grace",
+      amatic: "Amatic SC",
+      gochi: "Gochi Hand",
+      schoolbell: "Schoolbell",
+      waiting: "Waiting for the Sunrise",
       justme: "Just Me Again Down Here",
     };
     return fontMap[fontId] || "Kalam";
@@ -134,18 +186,24 @@ const EnhancedCanvas = ({
       img.onload = () => {
         ctx.save();
         ctx.globalAlpha = 0.95;
-        ctx.drawImage(img, imagePosition.x, imagePosition.y, imageSize.width, imageSize.height);
+        ctx.drawImage(
+          img,
+          imagePosition.x,
+          imagePosition.y,
+          imageSize.width,
+          imageSize.height,
+        );
         ctx.restore();
       };
       img.src = imageData;
     }
 
     // Render all text blocks
-    textBlocks.forEach(block => {
+    textBlocks.forEach((block) => {
       if (block.text && block.text.trim()) {
         ctx.save();
         ctx.translate(block.x, block.y);
-        
+
         const originalMarginLeft = PAPER_CONFIG.MARGIN_LEFT;
         const originalMarginTop = PAPER_CONFIG.MARGIN_TOP;
         PAPER_CONFIG.MARGIN_LEFT = 0;
@@ -167,44 +225,100 @@ const EnhancedCanvas = ({
         ctx.restore();
       }
     });
+  }, [
+    textBlocks,
+    imageData,
+    imagePosition,
+    imageSize,
+    paperStyle,
+    font,
+    penType,
+    messiness,
+    scannerEffect,
+    inkIntensity,
+    charSpacing,
+    currentFontSize,
+    lineHeight,
+    pageSize,
+    lineOpacity,
+    currentInkColor,
+  ]);
 
-    // Draw cursor preview when hovering
-    if (cursorPreview && !isInputActive) {
-      ctx.save();
-      ctx.strokeStyle = currentInkColor;
-      ctx.globalAlpha = 0.5;
-      ctx.lineWidth = 2;
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.moveTo(cursorPreview.x, cursorPreview.y);
-      ctx.lineTo(cursorPreview.x, cursorPreview.y + currentFontSize);
-      ctx.stroke();
-      ctx.restore();
+  // Separate effect for cursor preview to avoid full canvas re-render
+  useEffect(() => {
+    if (!canvasRef.current || !cursorPreview || isInputActive) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    
+    // Store the current canvas state
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    
+    // Draw cursor
+    ctx.save();
+    ctx.strokeStyle = currentInkColor;
+    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(cursorPreview.x, cursorPreview.y);
+    ctx.lineTo(cursorPreview.x, cursorPreview.y + currentFontSize);
+    ctx.stroke();
+    ctx.restore();
+
+    // Cleanup: restore canvas when cursor moves
+    return () => {
+      if (imageData) {
+        ctx.putImageData(imageData, 0, 0);
+      }
+    };
+  }, [cursorPreview, isInputActive, currentInkColor, currentFontSize]);
+
+  // Handle global mouse events for input dragging
+  useEffect(() => {
+    if (isDraggingInput) {
+      window.addEventListener('mousemove', handleInputMouseMove);
+      window.addEventListener('mouseup', handleInputMouseUp);
+      return () => {
+        window.removeEventListener('mousemove', handleInputMouseMove);
+        window.removeEventListener('mouseup', handleInputMouseUp);
+      };
     }
-  }, [textBlocks, imageData, imagePosition, imageSize, paperStyle, font, penType, messiness, scannerEffect, inkIntensity, charSpacing, currentFontSize, lineHeight, pageSize, lineOpacity, cursorPreview, isInputActive, currentInkColor]);
+  }, [isDraggingInput, dragStartPos]);
 
   // Handle canvas click to add/edit text
   const handleCanvasClick = (e) => {
     if (isDraggingImage) return;
-    
+
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
     const x = (e.clientX - rect.left) / scale;
     const y = (e.clientY - rect.top) / scale;
 
     // Check if clicking on image
-    if (imageData && 
-        x >= imagePosition.x && x <= imagePosition.x + imageSize.width &&
-        y >= imagePosition.y && y <= imagePosition.y + imageSize.height) {
+    if (
+      imageData &&
+      x >= imagePosition.x &&
+      x <= imagePosition.x + imageSize.width &&
+      y >= imagePosition.y &&
+      y <= imagePosition.y + imageSize.height
+    ) {
       return;
     }
 
     // Find if clicking near existing text block
     let clickedBlock = null;
     for (const block of textBlocks) {
-      const blockHeight = Math.max(100, block.text.split('\n').length * lineHeight);
-      if (x >= block.x - 10 && x <= block.x + 400 &&
-          y >= block.y - 10 && y <= block.y + blockHeight + 10) {
+      const blockHeight = Math.max(
+        100,
+        block.text.split("\n").length * lineHeight,
+      );
+      if (
+        x >= block.x - 10 &&
+        x <= block.x + 400 &&
+        y >= block.y - 10 &&
+        y <= block.y + blockHeight + 10
+      ) {
         clickedBlock = block;
         break;
       }
@@ -222,14 +336,24 @@ const EnhancedCanvas = ({
     setClickedPosition({ x, y });
     setCurrentBlockId(existingBlock?.id || null);
     setInputText(existingBlock?.text || "");
-    
+    setCursorPreview(null); // Hide cursor preview
+
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
-    setInputPosition({
-      x: rect.left + (x * scale),
-      y: rect.top + (y * scale)
-    });
     
+    // Position the input near the click but offset so it doesn't cover the text
+    const screenX = rect.left + x * scale;
+    const screenY = rect.top + y * scale;
+    
+    // Offset to the right and slightly down
+    const offsetX = 20;
+    const offsetY = -60;
+    
+    setInputPosition({
+      x: Math.min(screenX + offsetX, window.innerWidth - 420),
+      y: Math.max(80, Math.min(screenY + offsetY, window.innerHeight - 300)),
+    });
+
     setIsInputActive(true);
     setTimeout(() => floatingInputRef.current?.focus(), 50);
   };
@@ -250,12 +374,17 @@ const EnhancedCanvas = ({
     }
 
     let newTextBlocks;
-    
+
     if (currentBlockId) {
-      newTextBlocks = textBlocks.map(block =>
-        block.id === currentBlockId 
-          ? { ...block, text: inputText, fontSize: currentFontSize, color: currentInkColor }
-          : block
+      newTextBlocks = textBlocks.map((block) =>
+        block.id === currentBlockId
+          ? {
+              ...block,
+              text: inputText,
+              fontSize: currentFontSize,
+              color: currentInkColor,
+            }
+          : block,
       );
     } else {
       const newBlock = {
@@ -270,12 +399,12 @@ const EnhancedCanvas = ({
     }
 
     setTextBlocks(newTextBlocks);
-    
+
     const newHistory = history.slice(0, historyIndex + 1);
     newHistory.push(newTextBlocks);
     setHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
-    
+
     closeFloatingInput();
   };
 
@@ -296,9 +425,9 @@ const EnhancedCanvas = ({
 
   // Delete block
   const deleteBlock = (blockId) => {
-    const newTextBlocks = textBlocks.filter(block => block.id !== blockId);
+    const newTextBlocks = textBlocks.filter((block) => block.id !== blockId);
     setTextBlocks(newTextBlocks);
-    
+
     const newHistory = history.slice(0, historyIndex + 1);
     newHistory.push(newTextBlocks);
     setHistory(newHistory);
@@ -319,19 +448,27 @@ const EnhancedCanvas = ({
   // Image dragging
   const handleMouseDown = (e) => {
     if (!imageData) return;
-    
+
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
     const x = (e.clientX - rect.left) / scale;
     const y = (e.clientY - rect.top) / scale;
 
-    if (x >= imagePosition.x && x <= imagePosition.x + imageSize.width &&
-        y >= imagePosition.y && y <= imagePosition.y + imageSize.height) {
+    if (
+      x >= imagePosition.x &&
+      x <= imagePosition.x + imageSize.width &&
+      y >= imagePosition.y &&
+      y <= imagePosition.y + imageSize.height
+    ) {
       setIsDraggingImage(true);
       setDragOffset({ x: x - imagePosition.x, y: y - imagePosition.y });
       e.preventDefault();
     }
   };
+
+  const updateCursorPreview = throttle((x, y) => {
+    setCursorPreview({ x, y });
+  }, 16); // ~60fps
 
   const handleMouseMove = (e) => {
     if (isDraggingImage) {
@@ -341,15 +478,21 @@ const EnhancedCanvas = ({
       const y = (e.clientY - rect.top) / scale;
 
       setImagePosition({
-        x: Math.max(0, Math.min(x - dragOffset.x, PAPER_CONFIG.WIDTH - imageSize.width)),
-        y: Math.max(0, Math.min(y - dragOffset.y, PAPER_CONFIG.HEIGHT - imageSize.height))
+        x: Math.max(
+          0,
+          Math.min(x - dragOffset.x, PAPER_CONFIG.WIDTH - imageSize.width),
+        ),
+        y: Math.max(
+          0,
+          Math.min(y - dragOffset.y, PAPER_CONFIG.HEIGHT - imageSize.height),
+        ),
       });
     } else if (!isInputActive) {
       const canvas = canvasRef.current;
       const rect = canvas.getBoundingClientRect();
       const x = (e.clientX - rect.left) / scale;
       const y = (e.clientY - rect.top) / scale;
-      setCursorPreview({ x, y });
+      updateCursorPreview(x, y);
     }
   };
 
@@ -359,6 +502,29 @@ const EnhancedCanvas = ({
 
   const handleMouseLeave = () => {
     setCursorPreview(null);
+  };
+
+  // Floating input drag handlers
+  const handleInputMouseDown = (e) => {
+    if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'BUTTON') return;
+    setIsDraggingInput(true);
+    setDragStartPos({
+      x: e.clientX - inputPosition.x,
+      y: e.clientY - inputPosition.y,
+    });
+    e.preventDefault();
+  };
+
+  const handleInputMouseMove = (e) => {
+    if (!isDraggingInput) return;
+    setInputPosition({
+      x: e.clientX - dragStartPos.x,
+      y: e.clientY - dragStartPos.y,
+    });
+  };
+
+  const handleInputMouseUp = () => {
+    setIsDraggingInput(false);
   };
 
   // Export functions
@@ -375,7 +541,10 @@ const EnhancedCanvas = ({
   };
 
   return (
-    <div ref={containerRef} className="w-full h-full flex flex-col items-center p-8 relative">
+    <div
+      ref={containerRef}
+      className="w-full h-full flex flex-col items-center p-8 relative overflow-auto"
+    >
       {/* Enhanced Toolbar */}
       <div className="mb-4 flex gap-3 items-center flex-wrap justify-center bg-gray-800/50 p-4 rounded-xl backdrop-blur-sm border border-gray-700">
         {/* Font Size */}
@@ -468,7 +637,9 @@ const EnhancedCanvas = ({
       {/* Help Text */}
       <div className="mb-3 text-sm text-gray-300 flex items-center gap-2 bg-blue-500/10 px-4 py-2 rounded-lg border border-blue-500/30">
         <Plus className="w-4 h-4 text-blue-400" />
-        <span className="font-medium">Click anywhere on the page to add handwritten text</span>
+        <span className="font-medium">
+          Click anywhere on the page to add handwritten text
+        </span>
         {imageData && (
           <>
             <span className="mx-2 text-gray-500">•</span>
@@ -492,27 +663,30 @@ const EnhancedCanvas = ({
           }}
           style={{
             transform: `scale(${scale})`,
-            transformOrigin: 'top center',
+            transformOrigin: "top center",
             boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
-            cursor: isDraggingImage ? 'grabbing' : 'crosshair',
-            marginBottom: '2rem',
+            cursor: isDraggingImage ? "grabbing" : "crosshair",
+            marginBottom: "2rem",
+            willChange: "transform",
+            backfaceVisibility: "hidden",
           }}
         />
 
         {/* Floating Input Box */}
-        {isInputActive && (
-          <div
+        {isInputActive && (          <div
+            onMouseDown={handleInputMouseDown}
             className="fixed bg-white rounded-xl shadow-2xl border-2 border-blue-500 p-4 z-50 animate-in fade-in zoom-in duration-200"
             style={{
-              left: `${Math.min(inputPosition.x, window.innerWidth - 420)}px`,
-              top: `${Math.min(inputPosition.y, window.innerHeight - 250)}px`,
-              minWidth: '360px',
-              maxWidth: '400px',
+              left: `${inputPosition.x}px`,
+              top: `${inputPosition.y}px`,
+              minWidth: "360px",
+              maxWidth: "400px",
+              cursor: isDraggingInput ? 'grabbing' : 'grab',
             }}
           >
             <div className="flex items-center justify-between mb-3">
               <label className="text-xs font-bold text-gray-700 uppercase tracking-wide flex items-center gap-2">
-                <Type className="w-4 h-4" />
+                <Move className="w-4 h-4 text-gray-500" />
                 {currentBlockId ? "Edit Text Block" : "Add New Text"}
               </label>
               <div className="flex gap-1">
@@ -549,12 +723,18 @@ const EnhancedCanvas = ({
             />
             <div className="mt-3 flex items-center justify-between text-xs text-gray-600">
               <span className="flex items-center gap-1">
-                <kbd className="px-2 py-1 bg-gray-200 rounded font-mono text-[10px]">Ctrl</kbd>
+                <kbd className="px-2 py-1 bg-gray-200 rounded font-mono text-[10px]">
+                  Ctrl
+                </kbd>
                 +
-                <kbd className="px-2 py-1 bg-gray-200 rounded font-mono text-[10px]">Enter</kbd>
+                <kbd className="px-2 py-1 bg-gray-200 rounded font-mono text-[10px]">
+                  Enter
+                </kbd>
                 to submit
               </span>
-              <span className="text-gray-400">{inputText.length} characters</span>
+              <span className="text-gray-400">
+                {inputText.length} characters
+              </span>
             </div>
           </div>
         )}
@@ -567,7 +747,9 @@ const EnhancedCanvas = ({
             <h3 className="text-sm font-semibold text-gray-300">
               Text Blocks ({textBlocks.length})
             </h3>
-            <span className="text-xs text-gray-500">Click to edit or delete</span>
+            <span className="text-xs text-gray-500">
+              Click to edit or delete
+            </span>
           </div>
           <div className="space-y-2 max-h-48 overflow-y-auto pr-2 scrollbar-thin">
             {textBlocks.map((block, index) => (
@@ -578,17 +760,22 @@ const EnhancedCanvas = ({
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-mono text-gray-400">#{index + 1}</span>
+                    <span className="text-xs font-mono text-gray-400">
+                      #{index + 1}
+                    </span>
                     <span className="text-xs text-gray-500">
                       Size: {block.fontSize || currentFontSize}px
                     </span>
-                    <div 
-                      className="w-3 h-3 rounded-full border border-gray-500" 
-                      style={{ backgroundColor: block.color || currentInkColor }}
+                    <div
+                      className="w-3 h-3 rounded-full border border-gray-500"
+                      style={{
+                        backgroundColor: block.color || currentInkColor,
+                      }}
                     />
                   </div>
                   <p className="text-sm text-white truncate">
-                    {block.text.substring(0, 60)}{block.text.length > 60 ? '...' : ''}
+                    {block.text.substring(0, 60)}
+                    {block.text.length > 60 ? "..." : ""}
                   </p>
                 </div>
                 <button
@@ -610,4 +797,4 @@ const EnhancedCanvas = ({
   );
 };
 
-export default EnhancedCanvas;
+export default React.memo(EnhancedCanvas);

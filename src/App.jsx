@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import Sidebar from "./components/layout/Sidebar";
 import EnhancedCanvas from "./components/editor/EnhancedCanvas";
 import { useHandwritingSettings } from "./hooks/useHandwritingSettings";
@@ -12,9 +12,9 @@ function App() {
   const [uploadedDiagram, setUploadedDiagram] = useState(null);
   const [diagramLabels, setDiagramLabels] = useState([]);
 
-  const handleTextUpload = (content) => setText(content);
-  const handleDiagramUpload = (imageData) => setUploadedDiagram(imageData);
-  const handleTextChange = (newText) => setText(newText);
+  const handleTextUpload = useCallback((content) => setText(content), []);
+  const handleDiagramUpload = useCallback((imageData) => setUploadedDiagram(imageData), []);
+  const handleTextChange = useCallback((newText) => setText(newText), []);
 
   return (
     <div

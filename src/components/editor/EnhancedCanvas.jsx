@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState, useMemo, useCallback, memo } from "react";
 import {
   Download,
   FileDown,
@@ -80,18 +80,28 @@ const EnhancedCanvas = ({
   const [isDraggingImage, setIsDraggingImage] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const mouseMoveTimeoutRef = useRef(null);
+  const renderTimeoutRef = useRef(null);
+  const canvasImageCache = useRef(null);
+
+  // Debounce helper for expensive operations
+  const debounce = useCallback((func, delay) => {
+    return (...args) => {
+      clearTimeout(mouseMoveTimeoutRef.current);
+      mouseMoveTimeoutRef.current = setTimeout(() => func(...args), delay);
+    };
+  }, []);
 
   // Throttle helper to reduce lag
-  const throttle = (func, delay) => {
+  const throttle = useCallback((func, delay) => {
     return (...args) => {
-      if (!mouseMoveTimeoutRef.current) {
+      if (!renderTimeoutRef.current) {
         func(...args);
-        mouseMoveTimeoutRef.current = setTimeout(() => {
-          mouseMoveTimeoutRef.current = null;
+        renderTimeoutRef.current = setTimeout(() => {
+          renderTimeoutRef.current = null;
         }, delay);
       }
     };
-  };
+  }, []);
 
   // Initialize
   useEffect(() => {
@@ -147,38 +157,54 @@ const EnhancedCanvas = ({
     return () => window.removeEventListener("resize", updateScale);
   }, [pageSize]);
 
-  // Font name mapper
-  const getFontName = (fontId) => {
-    const fontMap = {
-      caveat: "Caveat",
-      indieflower: "Indie Flower",
-      shadows: "Shadows Into Light",
-      kalam: "Kalam",
-      architects: "Architects Daughter",
-      nothing: "Nothing You Could Do",
-      handlee: "Handlee",
-      covered: "Covered By Your Grace",
-      amatic: "Amatic SC",
-      gochi: "Gochi Hand",
-      schoolbell: "Schoolbell",
-      waiting: "Waiting for the Sunrise",
-      justme: "Just Me Again Down Here",
-    };
-    return fontMap[fontId] || "Kalam";
-  };
+  // Font name mapper - memoized for performance
+  const fontMap = useMemo(() => ({
+    caveat: "Caveat",
+    indieflower: "Indie Flower",
+    shadows: "Shadows Into Light",
+    kalam: "Kalam",
+    architects: "Architects Daughter",
+    nothing: "Nothing You Could Do",
+    handlee: "Handlee",
+    covered: "Covered By Your Grace",
+    amatic: "Amatic SC",
+    gochi: "Gochi Hand",
+    schoolbell: "Schoolbell",
+    waiting: "Waiting for the Sunrise",
+    justme: "Just Me Again Down Here",
+  }), []);
 
-  // Render canvas - re-render on every update
+  const getFontName = useCallback((fontId) => {
+    return fontMap[fontId] || "Kalam";
+  }, [fontMap]);
+
+  // Render canvas - optimized with debouncing and caching
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext("2d", { alpha: false });
-    canvas.width = PAPER_CONFIG.WIDTH;
-    canvas.height = PAPER_CONFIG.HEIGHT;
+    // Debounce rendering to avoid excessive redraws
+    const timeoutId = setTimeout(async () => {
+      const ctx = canvas.getContext("2d", { 
+        alpha: false,
+        willReadFrequently: false,
+        desynchronized: true // Better performance for animations
+      });
+      
+      canvas.width = PAPER_CONFIG.WIDTH;
+      canvas.height = PAPER_CONFIG.HEIGHT;
 
-    // Clear and draw paper background
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    drawPaperBackground(ctx, paperStyle, scannerEffect, lineOpacity);
+      // Wait for fonts to be loaded before rendering
+      const fontName = getFontName(font);
+      try {
+        await document.fonts.load(`${currentFontSize}px ${fontName}`);
+      } catch (e) {
+        console.warn('Font loading failed:', e);
+      }
+
+      // Clear and draw paper background
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawPaperBackground(ctx, paperStyle, scannerEffect, lineOpacity);
 
     // Draw image if exists
     if (imageData) {
@@ -208,9 +234,9 @@ const EnhancedCanvas = ({
         const originalMarginTop = PAPER_CONFIG.MARGIN_TOP;
         PAPER_CONFIG.MARGIN_LEFT = 0;
         PAPER_CONFIG.MARGIN_TOP = 0;
-
+        
         renderHandwriting(ctx, block.text, {
-          font: getFontName(font),
+          font: fontName,
           fontSize: block.fontSize || currentFontSize,
           inkColor: block.color || currentInkColor,
           penType,
@@ -225,6 +251,12 @@ const EnhancedCanvas = ({
         ctx.restore();
       }
     });
+
+      // Cache the rendered image for potential reuse
+      canvasImageCache.current = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    }, 50); // 50ms debounce
+
+    return () => clearTimeout(timeoutId);
   }, [
     textBlocks,
     imageData,
@@ -242,6 +274,7 @@ const EnhancedCanvas = ({
     pageSize,
     lineOpacity,
     currentInkColor,
+    getFontName,
   ]);
 
   // Separate effect for cursor preview to avoid full canvas re-render
@@ -286,8 +319,8 @@ const EnhancedCanvas = ({
     }
   }, [isDraggingInput, dragStartPos]);
 
-  // Handle canvas click to add/edit text
-  const handleCanvasClick = (e) => {
+  // Handle canvas click to add/edit text - memoized
+  const handleCanvasClick = useCallback((e) => {
     if (isDraggingImage) return;
 
     const canvas = canvasRef.current;
@@ -329,10 +362,10 @@ const EnhancedCanvas = ({
     } else {
       openFloatingInput(x, y, null);
     }
-  };
+  }, [isDraggingImage, imageData, imagePosition, imageSize, textBlocks, lineHeight]);
 
-  // Open floating input at position
-  const openFloatingInput = (x, y, existingBlock = null) => {
+  // Open floating input at position - memoized
+  const openFloatingInput = useCallback((x, y, existingBlock = null) => {
     setClickedPosition({ x, y });
     setCurrentBlockId(existingBlock?.id || null);
     setInputText(existingBlock?.text || "");
@@ -356,18 +389,18 @@ const EnhancedCanvas = ({
 
     setIsInputActive(true);
     setTimeout(() => floatingInputRef.current?.focus(), 50);
-  };
+  }, [scale]);
 
-  // Close floating input
-  const closeFloatingInput = () => {
+  // Close floating input - memoized
+  const closeFloatingInput = useCallback(() => {
     setIsInputActive(false);
     setInputText("");
     setCurrentBlockId(null);
     setClickedPosition(null);
-  };
+  }, []);
 
-  // Handle submit text
-  const handleSubmitText = () => {
+  // Handle submit text - memoized
+  const handleSubmitText = useCallback(() => {
     if (!inputText.trim()) {
       closeFloatingInput();
       return;
@@ -406,25 +439,25 @@ const EnhancedCanvas = ({
     setHistoryIndex(newHistory.length - 1);
 
     closeFloatingInput();
-  };
+  }, [inputText, currentBlockId, clickedPosition, textBlocks, currentFontSize, currentInkColor, history, historyIndex, closeFloatingInput]);
 
-  // Undo/Redo
-  const handleUndo = () => {
+  // Undo/Redo - memoized
+  const handleUndo = useCallback(() => {
     if (historyIndex > 0) {
       setHistoryIndex(historyIndex - 1);
       setTextBlocks(history[historyIndex - 1]);
     }
-  };
+  }, [historyIndex, history]);
 
-  const handleRedo = () => {
+  const handleRedo = useCallback(() => {
     if (historyIndex < history.length - 1) {
       setHistoryIndex(historyIndex + 1);
       setTextBlocks(history[historyIndex + 1]);
     }
-  };
+  }, [historyIndex, history]);
 
-  // Delete block
-  const deleteBlock = (blockId) => {
+  // Delete block - memoized
+  const deleteBlock = useCallback((blockId) => {
     const newTextBlocks = textBlocks.filter((block) => block.id !== blockId);
     setTextBlocks(newTextBlocks);
 
@@ -432,10 +465,10 @@ const EnhancedCanvas = ({
     newHistory.push(newTextBlocks);
     setHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
-  };
+  }, [textBlocks, history, historyIndex]);
 
-  // Clear all
-  const handleClearAll = () => {
+  // Clear all - memoized
+  const handleClearAll = useCallback(() => {
     if (window.confirm("Clear all text? This cannot be undone.")) {
       setTextBlocks([]);
       const newHistory = history.slice(0, historyIndex + 1);
@@ -443,7 +476,7 @@ const EnhancedCanvas = ({
       setHistory(newHistory);
       setHistoryIndex(newHistory.length - 1);
     }
-  };
+  }, [history, historyIndex]);
 
   // Image dragging
   const handleMouseDown = (e) => {
@@ -466,11 +499,11 @@ const EnhancedCanvas = ({
     }
   };
 
-  const updateCursorPreview = throttle((x, y) => {
+  const updateCursorPreview = useMemo(() => throttle((x, y) => {
     setCursorPreview({ x, y });
-  }, 16); // ~60fps
+  }, 32), [throttle]); // ~30fps is enough for cursor preview
 
-  const handleMouseMove = (e) => {
+  const handleMouseMove = useCallback((e) => {
     if (isDraggingImage) {
       const canvas = canvasRef.current;
       const rect = canvas.getBoundingClientRect();
@@ -494,15 +527,15 @@ const EnhancedCanvas = ({
       const y = (e.clientY - rect.top) / scale;
       updateCursorPreview(x, y);
     }
-  };
+  }, [isDraggingImage, isInputActive, scale, dragOffset, imageSize, updateCursorPreview]);
 
-  const handleMouseUp = () => {
+  const handleMouseUp = useCallback(() => {
     setIsDraggingImage(false);
-  };
+  }, []);
 
-  const handleMouseLeave = () => {
+  const handleMouseLeave = useCallback(() => {
     setCursorPreview(null);
-  };
+  }, []);
 
   // Floating input drag handlers
   const handleInputMouseDown = (e) => {
@@ -527,18 +560,18 @@ const EnhancedCanvas = ({
     setIsDraggingInput(false);
   };
 
-  // Export functions
-  const handleExportPDF = async () => {
+  // Export functions - memoized
+  const handleExportPDF = useCallback(async () => {
     if (canvasRef.current) {
       await exportToPDF(canvasRef.current, "handwritten-note.pdf");
     }
-  };
+  }, []);
 
-  const handleExportPNG = async () => {
+  const handleExportPNG = useCallback(async () => {
     if (canvasRef.current) {
       await exportToPNG(canvasRef.current, "handwritten-note.png");
     }
-  };
+  }, []);
 
   return (
     <div

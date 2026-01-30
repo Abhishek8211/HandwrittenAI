@@ -105,50 +105,69 @@ class SeededRandom {
   }
 }
 
+// Cache for random number generators to avoid recreating them
+const rngCache = new Map();
+const getRNG = (seed) => {
+  if (!rngCache.has(seed)) {
+    rngCache.set(seed, new SeededRandom(seed));
+    // Limit cache size to prevent memory bloat
+    if (rngCache.size > 10000) {
+      const firstKey = rngCache.keys().next().value;
+      rngCache.delete(firstKey);
+    }
+  }
+  return rngCache.get(seed);
+};
+
 /**
- * Generate baseline jitter for natural character placement
+ * Generate baseline jitter for natural character placement (OPTIMIZED)
  */
 export const getBaselineJitter = (charIndex, messiness) => {
-  const rng = new SeededRandom(charIndex);
-  const scale = messiness / 100;
+  if (messiness === 0) return 0; // Skip calculation if no messiness
+  const rng = getRNG(charIndex);
+  const scale = messiness * 0.01; // Multiply by 0.01 instead of dividing by 100
   return rng.range(-1.5, 1.5) * scale;
 };
 
 /**
- * Calculate organic kerning (natural letter spacing)
+ * Calculate organic kerning (natural letter spacing) (OPTIMIZED)
  */
 export const getOrganicKerning = (charIndex, baseKerning, messiness) => {
-  const rng = new SeededRandom(charIndex + 1000);
-  const scale = messiness / 100;
+  if (messiness === 0) return baseKerning; // Skip if no messiness
+  const rng = getRNG(charIndex + 1000);
+  const scale = messiness * 0.01;
   const variation = rng.range(-1.5, 1.5) * scale;
   return baseKerning + variation;
 };
 
 /**
- * Get character rotation for natural handwriting
+ * Get character rotation for natural handwriting (OPTIMIZED)
  */
 export const getCharacterRotation = (charIndex, messiness) => {
-  const rng = new SeededRandom(charIndex + 3000);
-  const scale = messiness / 100;
+  if (messiness === 0) return 0;
+  const rng = getRNG(charIndex + 3000);
+  const scale = messiness * 0.01;
   return rng.range(-3, 3) * scale; // degrees
 };
 
 /**
- * Get stroke width variation
+ * Get stroke width variation (OPTIMIZED)
  */
 export const getStrokeVariation = (charIndex, messiness) => {
-  const rng = new SeededRandom(charIndex + 4000);
-  const scale = messiness / 100;
+  if (messiness === 0) return 1;
+  const rng = getRNG(charIndex + 4000);
+  const scale = messiness * 0.01;
   return 1 + rng.range(-0.15, 0.15) * scale;
 };
 
 /**
- * Calculate line drift (gradual tilt across page width)
+ * Calculate line drift (gradual tilt across page width) (OPTIMIZED)
  */
 export const getLineDrift = (x, lineIndex, messiness) => {
+  if (messiness === 0) return 0;
   const textArea = getTextArea();
   const progress = x / textArea.width; // 0 to 1 across the line
-  const scale = messiness / 100;
+  const scale = messiness * 0.01;
   const maxDrift = 0.5 * scale; // degrees
 
   // Alternate drift direction per line for realism
@@ -158,10 +177,10 @@ export const getLineDrift = (x, lineIndex, messiness) => {
 };
 
 /**
- * Get pressure variation (simulates pen pressure)
+ * Get pressure variation (simulates pen pressure) (OPTIMIZED)
  */
 export const getPressureVariation = (wordIndex) => {
-  const rng = new SeededRandom(wordIndex + 2000);
+  const rng = getRNG(wordIndex + 2000);
   return rng.range(0.88, 1.0);
 };
 
@@ -196,7 +215,7 @@ export const resetInkEffect = (ctx) => {
 // ============================================
 
 /**
- * Main handwriting rendering function (OPTIMIZED)
+ * Main handwriting rendering function (HIGHLY OPTIMIZED)
  * Renders text with physics-based imperfections
  */
 export const renderHandwriting = (ctx, text, options) => {
@@ -215,74 +234,81 @@ export const renderHandwriting = (ctx, text, options) => {
   let currentY = textArea.y;
   const lines = text.split("\n");
   const maxLineWidth = textArea.width - 20; // Leave some padding
+  const bottomLimit = PAPER_CONFIG.HEIGHT - PAPER_CONFIG.MARGIN_BOTTOM;
 
-  // Performance: Set font once
+  // Performance: Set font once and cache measurements
   ctx.save();
   ctx.font = `${fontSize}px ${font}`;
   ctx.textBaseline = "alphabetic";
   ctx.fillStyle = inkColor;
 
+  // Pre-calculate commonly used values
+  const spaceWidth = ctx.measureText(" ").width;
+  const messinessScale = messiness * 0.01;
+  const PI_OVER_180 = Math.PI / 180;
+
   let lineIndex = 0;
 
-  lines.forEach((line) => {
-    if (currentY > PAPER_CONFIG.HEIGHT - PAPER_CONFIG.MARGIN_BOTTOM) {
-      return; // Skip if we're out of bounds
-    }
+  // Batch rendering by line for better performance
+  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+    const line = lines[lineIdx];
+    
+    if (currentY > bottomLimit) break; // Early exit if out of bounds
 
     let currentX = textArea.x;
     const words = line.split(" ");
 
-    words.forEach((word, wordIndex) => {
-      // Check if word fits on current line
-      const wordWidth =
-        ctx.measureText(word).width + ctx.measureText(" ").width;
+    for (let wordIdx = 0; wordIdx < words.length; wordIdx++) {
+      const word = words[wordIdx];
+      
+      // Quick word width calculation
+      const wordWidth = ctx.measureText(word).width + spaceWidth;
 
-      if (
-        currentX + wordWidth > textArea.x + maxLineWidth &&
-        currentX > textArea.x
-      ) {
+      if (currentX + wordWidth > textArea.x + maxLineWidth && currentX > textArea.x) {
         // Word doesn't fit, move to next line
         currentY += lineHeight;
         currentX = textArea.x;
         lineIndex++;
 
-        // Check if we're still within page bounds
-        if (currentY > PAPER_CONFIG.HEIGHT - PAPER_CONFIG.MARGIN_BOTTOM) {
-          return;
-        }
+        if (currentY > bottomLimit) break; // Check bounds
       }
 
-      // Apply pressure variation per word
-      const alpha = getPressureVariation(lineIndex * 100 + wordIndex);
+      // Apply pressure variation per word (cached)
+      const alpha = getPressureVariation(lineIndex * 100 + wordIdx);
       ctx.globalAlpha = alpha;
 
-      // Apply ink effect (with intensity)
+      // Apply ink effect once per word (not per character)
       applyInkEffect(ctx, penType, inkIntensity);
 
       // Render each character with physics
       for (let i = 0; i < word.length; i++) {
         const char = word[i];
-        const charIndex = lineIndex * 1000 + wordIndex * 100 + i;
+        const charIndex = lineIndex * 1000 + wordIdx * 100 + i;
 
-        // Calculate physics-based positioning
+        // Calculate physics-based positioning (optimized)
         const jitter = getBaselineJitter(charIndex, messiness);
-        const drift = getLineDrift(currentX, lineIndex, messiness);
+        const drift = messinessScale > 0 ? getLineDrift(currentX, lineIndex, messiness) : 0;
         const rotation = getCharacterRotation(charIndex, messiness);
         const strokeScale = getStrokeVariation(charIndex, messiness);
 
-        ctx.save();
-        ctx.translate(currentX, currentY + jitter);
+        // Only apply transformations if needed
+        if (jitter !== 0 || drift !== 0 || rotation !== 0 || strokeScale !== 1) {
+          ctx.save();
+          ctx.translate(currentX, currentY + jitter);
 
-        // Apply rotation for natural look
-        ctx.rotate(((drift + rotation) * Math.PI) / 180);
+          // Apply rotation for natural look (optimized)
+          const totalRotation = (drift + rotation) * PI_OVER_180;
+          if (totalRotation !== 0) ctx.rotate(totalRotation);
 
-        // Scale for stroke variation
-        ctx.scale(strokeScale, 1);
+          // Scale for stroke variation
+          if (strokeScale !== 1) ctx.scale(strokeScale, 1);
 
-        // Render the character
-        ctx.fillText(char, 0, 0);
-
-        ctx.restore();
+          ctx.fillText(char, 0, 0);
+          ctx.restore();
+        } else {
+          // Fast path when no transformations needed
+          ctx.fillText(char, currentX, currentY);
+        }
 
         // Move to next character position with organic kerning
         const charWidth = ctx.measureText(char).width;
@@ -291,14 +317,13 @@ export const renderHandwriting = (ctx, text, options) => {
       }
 
       // Add space after word
-      const spaceWidth = ctx.measureText(" ").width;
       currentX += spaceWidth;
-    });
+    }
 
     // Move to next line after processing the line
     currentY += lineHeight;
     lineIndex++;
-  });
+  }
 
   ctx.restore();
   resetInkEffect(ctx);
@@ -308,8 +333,12 @@ export const renderHandwriting = (ctx, text, options) => {
 // 5. PAPER TEXTURE RENDERING
 // ============================================
 
+// Cache for paper background to avoid redrawing
+let paperBackgroundCache = null;
+let lastPaperConfig = null;
+
 /**
- * Draw paper background with texture
+ * Draw paper background with texture (OPTIMIZED WITH CACHING)
  */
 export const drawPaperBackground = (
   ctx,
@@ -318,6 +347,15 @@ export const drawPaperBackground = (
   lineOpacity = 0.6,
 ) => {
   const { WIDTH, HEIGHT } = PAPER_CONFIG;
+  
+  // Create cache key
+  const cacheKey = `${paperStyle}_${scannerEffect}_${lineOpacity}_${WIDTH}_${HEIGHT}`;
+  
+  // Check if we can use cached background
+  if (lastPaperConfig === cacheKey && paperBackgroundCache) {
+    ctx.putImageData(paperBackgroundCache, 0, 0);
+    return;
+  }
 
   // Base paper color
   let baseColor = "#FFFFFF";
@@ -345,6 +383,10 @@ export const drawPaperBackground = (
   if (scannerEffect) {
     applyScannerEffect(ctx);
   }
+  
+  // Cache the background
+  paperBackgroundCache = ctx.getImageData(0, 0, WIDTH, HEIGHT);
+  lastPaperConfig = cacheKey;
 };
 
 /**
@@ -370,7 +412,7 @@ const drawRuledLines = (ctx, color, opacity = 0.6) => {
 };
 
 /**
- * Draw dotted grid pattern
+ * Draw dotted grid pattern (OPTIMIZED)
  */
 const drawDottedGrid = (ctx, opacity = 0.4) => {
   const spacing = 20;
@@ -379,13 +421,15 @@ const drawDottedGrid = (ctx, opacity = 0.4) => {
   ctx.fillStyle = "#CED4DA";
   ctx.globalAlpha = opacity;
 
+  // Use path batching for better performance
+  ctx.beginPath();
   for (let x = spacing; x < WIDTH; x += spacing) {
     for (let y = spacing; y < HEIGHT; y += spacing) {
-      ctx.beginPath();
+      ctx.moveTo(x + 1, y);
       ctx.arc(x, y, 1, 0, Math.PI * 2);
-      ctx.fill();
     }
   }
+  ctx.fill();
 
   ctx.globalAlpha = 1;
 };

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 
 export const useHandwritingSettings = () => {
   const [settings, setSettings] = useState({
@@ -16,12 +16,13 @@ export const useHandwritingSettings = () => {
     lineOpacity: 0.6, // 0.1 to 1.0
   });
 
-  const updateSetting = (key, value) => {
+  // Memoize update function to prevent re-renders
+  const updateSetting = useCallback((key, value) => {
     setSettings((prev) => ({
       ...prev,
       [key]: value,
     }));
-  };
+  }, []);
 
   return {
     settings,

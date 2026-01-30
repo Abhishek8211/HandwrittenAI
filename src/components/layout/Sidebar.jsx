@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useCallback, useMemo } from "react";
 import {
   Upload,
   FileText,
@@ -21,29 +21,30 @@ const Sidebar = ({
   diagramLabels = [],
   onDiagramLabelsChange,
 }) => {
-  const paperOptions = [
+  // Memoize static data to prevent recreation
+  const paperOptions = useMemo(() => [
     { value: "ruled-blue", label: "Blue Lines", icon: FileText },
     { value: "ruled-black", label: "Black Lines", icon: Scroll },
     { value: "dotted", label: "Dotted", icon: CircleDot },
     { value: "plain", label: "Plain", icon: Grid3x3 },
-  ];
+  ], []);
 
-  const inkColors = [
+  const inkColors = useMemo(() => [
     { value: "#1E40AF", label: "Blue", color: "#1E40AF" },
     { value: "#1F2937", label: "Black", color: "#1F2937" },
     { value: "#DC2626", label: "Red", color: "#DC2626" },
     { value: "#059669", label: "Green", color: "#059669" },
-  ];
+  ], []);
 
-  const penTypes = [
+  const penTypes = useMemo(() => [
     { value: "ballpoint", label: "Ballpoint" },
     { value: "gel", label: "Gel" },
     { value: "fountain", label: "Fountain" },
     { value: "pencil", label: "Pencil" },
     { value: "marker", label: "Marker" },
-  ];
+  ], []);
 
-  const fonts = [
+  const fonts = useMemo(() => [
     { value: "kalam", label: "Kalam (Natural)" },
     { value: "handlee", label: "Handlee (Casual)" },
     { value: "architects", label: "Architect's Hand" },
@@ -57,9 +58,9 @@ const Sidebar = ({
     { value: "amatic", label: "Amatic SC" },
     { value: "waiting", label: "Waiting Sunrise" },
     { value: "justme", label: "Just Me" },
-  ];
+  ], []);
 
-  const handleFileUpload = (e, type) => {
+  const handleFileUpload = useCallback((e, type) => {
     const file = e.target.files[0];
     if (!file) return;
 
@@ -77,7 +78,7 @@ const Sidebar = ({
     } else {
       reader.readAsDataURL(file);
     }
-  };
+  }, [onTextUpload, onDiagramUpload]);
 
   return (
     <div

@@ -10,6 +10,29 @@
   scroll-behavior: smooth;
 }
 
+/* Performance optimizations */
+* {
+  /* Enable hardware acceleration for transforms */
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+}
+
+canvas {
+  /* Optimize canvas rendering */
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+/* Optimize scrolling performance */
+.overflow-auto,
+.overflow-y-auto {
+  -webkit-overflow-scrolling: touch;
+  will-change: scroll-position;
+  contain: layout style paint;
+}
+
 /* Custom scrollbar styling */
 ::-webkit-scrollbar {
   width: 10px;

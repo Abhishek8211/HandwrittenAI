@@ -51,6 +51,7 @@ function App() {
           lineHeight={settings.lineHeight}
           pageSize={settings.pageSize}
           lineOpacity={settings.lineOpacity}
+          updateSetting={updateSetting}
         />
       </div>
     </div>

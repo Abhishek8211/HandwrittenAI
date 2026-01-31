@@ -46,6 +46,7 @@ const EnhancedCanvas = ({
   lineHeight = 40,
   pageSize = "A4",
   lineOpacity = 0.6,
+  updateSetting,
 }) => {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -120,6 +121,14 @@ const EnhancedCanvas = ({
 
   useEffect(() => {
     setCurrentInkColor(inkColor);
+    
+    // Update all existing text blocks to use the new ink color
+    setTextBlocks(prevBlocks => 
+      prevBlocks.map(block => ({
+        ...block,
+        color: inkColor
+      }))
+    );
   }, [inkColor]);
 
   // Initialize with sidebar text if provided
@@ -274,6 +283,7 @@ const EnhancedCanvas = ({
     pageSize,
     lineOpacity,
     currentInkColor,
+    inkColor,
     getFontName,
   ]);
 
@@ -607,7 +617,20 @@ const EnhancedCanvas = ({
             ].map((ink) => (
               <button
                 key={ink.color}
-                onClick={() => setCurrentInkColor(ink.color)}
+                onClick={() => {
+                  setCurrentInkColor(ink.color);
+                  // Update all existing text blocks to use the new color
+                  setTextBlocks(prevBlocks => 
+                    prevBlocks.map(block => ({
+                      ...block,
+                      color: ink.color
+                    }))
+                  );
+                  // Update the sidebar setting to keep them in sync
+                  if (updateSetting) {
+                    updateSetting("inkColor", ink.color);
+                  }
+                }}
                 className={`w-8 h-8 rounded-full border-2 transition-all ${
                   currentInkColor === ink.color
                     ? "border-white scale-110 shadow-lg"

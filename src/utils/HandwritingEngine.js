@@ -189,18 +189,62 @@ export const getPressureVariation = (wordIndex) => {
 // ============================================
 
 /**
- * Apply natural ink effect to canvas context
+ * Apply natural ink effect to canvas context with pen-specific characteristics
  */
 export const applyInkEffect = (ctx, penType, inkIntensity = 1.0) => {
   const effects = {
-    ballpoint: `blur(${0.2 * inkIntensity}px) contrast(${1.1 + (inkIntensity - 1) * 0.1})`,
-    gel: `blur(${0.3 * inkIntensity}px) contrast(${1.15 + (inkIntensity - 1) * 0.1}) saturate(${1.2 + (inkIntensity - 1) * 0.2})`,
-    fountain: `blur(${0.5 * inkIntensity}px) contrast(${1.05 + (inkIntensity - 1) * 0.05}) opacity(${0.95 - (inkIntensity - 1) * 0.05})`,
-    pencil: `blur(${0.15 * inkIntensity}px) contrast(${1.2 + (inkIntensity - 1) * 0.15}) brightness(0.9)`,
-    marker: `blur(${0.4 * inkIntensity}px) contrast(${1.25 + (inkIntensity - 1) * 0.2}) saturate(${1.4 + (inkIntensity - 1) * 0.3})`,
+    // Ballpoint: Sharp, consistent, slightly faded
+    ballpoint: `blur(${0.3 * inkIntensity}px) contrast(${1.15 + (inkIntensity - 1) * 0.1}) opacity(0.85)`,
+    
+    // Gel: Smooth, bold, high contrast with vibrant color
+    gel: `blur(${0.1 * inkIntensity}px) contrast(${1.35 + (inkIntensity - 1) * 0.15}) saturate(${1.5 + (inkIntensity - 1) * 0.3}) brightness(1.05)`,
+    
+    // Fountain: Variable thickness, slight blur, elegant
+    fountain: `blur(${0.8 * inkIntensity}px) contrast(${1.05 + (inkIntensity - 1) * 0.05}) opacity(${0.9 - (inkIntensity - 1) * 0.05})`,
+    
+    // Pencil: Grainy, lighter, with texture
+    pencil: `blur(${0.2 * inkIntensity}px) contrast(${1.4 + (inkIntensity - 1) * 0.2}) brightness(0.7) opacity(0.75)`,
+    
+    // Marker: Bold, saturated, slight bleed
+    marker: `blur(${0.6 * inkIntensity}px) contrast(${1.3 + (inkIntensity - 1) * 0.25}) saturate(${1.8 + (inkIntensity - 1) * 0.4}) brightness(1.1)`,
   };
 
   ctx.filter = effects[penType] || effects.ballpoint;
+};
+
+/**
+ * Get pen-specific rendering properties
+ */
+export const getPenProperties = (penType) => {
+  const properties = {
+    ballpoint: {
+      lineWidthMultiplier: 1.0,
+      alphaVariation: 0.05,
+      strokeVariation: 0.08,
+    },
+    gel: {
+      lineWidthMultiplier: 1.15,
+      alphaVariation: 0.02,
+      strokeVariation: 0.05,
+    },
+    fountain: {
+      lineWidthMultiplier: 1.25,
+      alphaVariation: 0.12,
+      strokeVariation: 0.15,
+    },
+    pencil: {
+      lineWidthMultiplier: 0.9,
+      alphaVariation: 0.15,
+      strokeVariation: 0.12,
+    },
+    marker: {
+      lineWidthMultiplier: 1.4,
+      alphaVariation: 0.08,
+      strokeVariation: 0.06,
+    },
+  };
+  
+  return properties[penType] || properties.ballpoint;
 };
 
 /**
@@ -246,6 +290,9 @@ export const renderHandwriting = (ctx, text, options) => {
   const spaceWidth = ctx.measureText(" ").width;
   const messinessScale = messiness * 0.01;
   const PI_OVER_180 = Math.PI / 180;
+  
+  // Get pen-specific properties
+  const penProps = getPenProperties(penType);
 
   let lineIndex = 0;
 
@@ -273,9 +320,10 @@ export const renderHandwriting = (ctx, text, options) => {
         if (currentY > bottomLimit) break; // Check bounds
       }
 
-      // Apply pressure variation per word (cached)
-      const alpha = getPressureVariation(lineIndex * 100 + wordIdx);
-      ctx.globalAlpha = alpha;
+      // Apply pressure variation per word with pen-specific alpha variation
+      const baseAlpha = getPressureVariation(lineIndex * 100 + wordIdx);
+      const penAlpha = 1 - penProps.alphaVariation + (baseAlpha * penProps.alphaVariation);
+      ctx.globalAlpha = penAlpha;
 
       // Apply ink effect once per word (not per character)
       applyInkEffect(ctx, penType, inkIntensity);
@@ -289,7 +337,10 @@ export const renderHandwriting = (ctx, text, options) => {
         const jitter = getBaselineJitter(charIndex, messiness);
         const drift = messinessScale > 0 ? getLineDrift(currentX, lineIndex, messiness) : 0;
         const rotation = getCharacterRotation(charIndex, messiness);
-        const strokeScale = getStrokeVariation(charIndex, messiness);
+        
+        // Apply pen-specific stroke variation
+        const baseStrokeScale = getStrokeVariation(charIndex, messiness);
+        const strokeScale = 1 + (baseStrokeScale - 1) * penProps.strokeVariation;
 
         // Only apply transformations if needed
         if (jitter !== 0 || drift !== 0 || rotation !== 0 || strokeScale !== 1) {
@@ -345,14 +396,17 @@ export const drawPaperBackground = (
   paperStyle,
   scannerEffect = false,
   lineOpacity = 0.6,
+  showMarginLine = true,
 ) => {
   const { WIDTH, HEIGHT } = PAPER_CONFIG;
   
   // Create cache key
-  const cacheKey = `${paperStyle}_${scannerEffect}_${lineOpacity}_${WIDTH}_${HEIGHT}`;
+  const cacheKey = `${paperStyle}_${scannerEffect}_${lineOpacity}_${showMarginLine}_${WIDTH}_${HEIGHT}`;
   
   // Check if we can use cached background
   if (lastPaperConfig === cacheKey && paperBackgroundCache) {
+    // Clear canvas first to ensure clean render
+    ctx.clearRect(0, 0, WIDTH, HEIGHT);
     ctx.putImageData(paperBackgroundCache, 0, 0);
     return;
   }
@@ -376,8 +430,10 @@ export const drawPaperBackground = (
     drawDottedGrid(ctx, lineOpacity);
   }
 
-  // Draw red margin line
-  drawMarginLine(ctx);
+  // Draw red margin line (if enabled)
+  if (showMarginLine) {
+    drawMarginLine(ctx);
+  }
 
   // Apply scanner effect
   if (scannerEffect) {

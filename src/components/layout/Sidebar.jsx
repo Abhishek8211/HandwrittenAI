@@ -21,6 +21,21 @@ const Sidebar = ({
   diagramLabels = [],
   onDiagramLabelsChange,
 }) => {
+  const [localText, setLocalText] = React.useState(text);
+  const debounceTimerRef = React.useRef(null);
+
+  // Debounced text change handler - debounce only the expensive canvas update
+  const handleTextChange = React.useCallback((newText) => {
+    setLocalText(newText); // Instant local update
+    
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    
+    debounceTimerRef.current = setTimeout(() => {
+      onTextChange(newText);
+    }, 500); // 500ms debounce - only update canvas after user stops typing
+  }, [onTextChange]);
   // Memoize static data to prevent recreation
   const paperOptions = useMemo(() => [
     { value: "ruled-blue", label: "Blue Lines", icon: FileText },
@@ -103,20 +118,26 @@ const Sidebar = ({
               Your Text
             </h3>
             <button
-              onClick={() => onTextChange("")}
+              onClick={() => {
+                setLocalText("");
+                onTextChange("");
+              }}
               className="text-xs text-red-400 hover:text-red-300 transition-colors"
             >
               Clear
             </button>
           </div>
           <textarea
-            value={text}
-            onChange={(e) => onTextChange(e.target.value)}
+            value={localText}
+            onChange={(e) => handleTextChange(e.target.value)}
             placeholder="Write your text here..."
             className="w-full h-32 px-3 py-2.5 rounded-lg bg-white/5 border border-white/10 text-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all resize-none placeholder-gray-500"
             spellCheck="false"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
           />
-          <p className="text-[10px] text-gray-500">{text.length} characters</p>
+          <p className="text-[10px] text-gray-500">{localText.length} characters</p>
         </div>
 
         {/* Upload Zone */}
@@ -253,6 +274,23 @@ const Sidebar = ({
                 </button>
               );
             })}
+          </div>
+          
+          {/* Red Margin Line Toggle */}
+          <div className="flex items-center justify-between p-3 rounded-lg bg-white/5 border border-white/10">
+            <span className="text-xs text-gray-300 font-medium">Red Margin Line</span>
+            <button
+              onClick={() => updateSetting("showMarginLine", !settings.showMarginLine)}
+              className={`w-11 h-5 rounded-full transition-all relative ${
+                settings.showMarginLine ? "bg-red-500" : "bg-white/10"
+              }`}
+            >
+              <div
+                className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-lg transition-transform ${
+                  settings.showMarginLine ? "translate-x-6" : "translate-x-0.5"
+                }`}
+              />
+            </button>
           </div>
         </div>
 

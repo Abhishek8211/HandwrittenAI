@@ -46,12 +46,15 @@ const EnhancedCanvas = ({
   lineHeight = 40,
   pageSize = "A4",
   lineOpacity = 0.6,
+  showMarginLine = true,
   updateSetting,
 }) => {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
   const floatingInputRef = useRef(null);
   const initialTextRendered = useRef(false);
+  const ctxRef = useRef(null);
+  const fontLoadedRef = useRef({});
 
   const [scale, setScale] = useState(1);
   const [textBlocks, setTextBlocks] = useState([]);
@@ -131,9 +134,17 @@ const EnhancedCanvas = ({
     );
   }, [inkColor]);
 
-  // Initialize with sidebar text if provided
+  // Initialize and update text block (optimized single effect)
   useEffect(() => {
-    if (initialText && initialText.trim() && !initialTextRendered.current) {
+    if (!initialText || !initialText.trim()) {
+      if (initialTextRendered.current) {
+        setTextBlocks([]);
+      }
+      return;
+    }
+
+    // Initial setup
+    if (!initialTextRendered.current) {
       const initialBlock = {
         id: 1,
         x: PAPER_CONFIG.MARGIN_LEFT + 10,
@@ -146,7 +157,19 @@ const EnhancedCanvas = ({
       setHistory([[initialBlock]]);
       setHistoryIndex(0);
       initialTextRendered.current = true;
+      return;
     }
+
+    // Update existing block
+    setTextBlocks(prevBlocks => {
+      if (prevBlocks.length === 0) return prevBlocks;
+      const updatedBlocks = [...prevBlocks];
+      updatedBlocks[0] = {
+        ...updatedBlocks[0],
+        text: initialText,
+      };
+      return updatedBlocks;
+    });
   }, [initialText, globalFontSize, inkColor]);
 
   // Calculate scale
@@ -187,85 +210,108 @@ const EnhancedCanvas = ({
     return fontMap[fontId] || "Kalam";
   }, [fontMap]);
 
-  // Render canvas - optimized with debouncing and caching
+  // Initialize canvas context once
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || ctxRef.current) return;
 
-    // Debounce rendering to avoid excessive redraws
-    const timeoutId = setTimeout(async () => {
-      const ctx = canvas.getContext("2d", { 
-        alpha: false,
-        willReadFrequently: false,
-        desynchronized: true // Better performance for animations
+    // Set canvas size once
+    canvas.width = PAPER_CONFIG.WIDTH;
+    canvas.height = PAPER_CONFIG.HEIGHT;
+
+    // Get and cache context
+    ctxRef.current = canvas.getContext("2d", { 
+      alpha: false,
+      willReadFrequently: false,
+      desynchronized: true
+    });
+  }, []);
+
+  // Preload fonts asynchronously without blocking
+  useEffect(() => {
+    const fontName = getFontName(font);
+    if (!fontLoadedRef.current[fontName]) {
+      document.fonts.load(`${currentFontSize}px ${fontName}`).then(() => {
+        fontLoadedRef.current[fontName] = true;
+      }).catch(() => {
+        fontLoadedRef.current[fontName] = true; // Mark as loaded anyway
       });
-      
-      canvas.width = PAPER_CONFIG.WIDTH;
-      canvas.height = PAPER_CONFIG.HEIGHT;
+    }
+  }, [font, currentFontSize, getFontName]);
 
-      // Wait for fonts to be loaded before rendering
+  // Render canvas - INSTANT synchronous rendering with smart debouncing
+  useEffect(() => {
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+
+    // Use requestAnimationFrame for optimal timing (batches rapid updates at 60fps)
+    let rafId = requestAnimationFrame(() => {
+      // SYNCHRONOUS render - no async, no delays
       const fontName = getFontName(font);
-      try {
-        await document.fonts.load(`${currentFontSize}px ${fontName}`);
-      } catch (e) {
-        console.warn('Font loading failed:', e);
-      }
 
       // Clear and draw paper background
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      drawPaperBackground(ctx, paperStyle, scannerEffect, lineOpacity);
+      ctx.clearRect(0, 0, PAPER_CONFIG.WIDTH, PAPER_CONFIG.HEIGHT);
+      drawPaperBackground(ctx, paperStyle, scannerEffect, lineOpacity, showMarginLine);
 
-    // Draw image if exists
-    if (imageData) {
-      const img = new Image();
-      img.onload = () => {
-        ctx.save();
-        ctx.globalAlpha = 0.95;
-        ctx.drawImage(
-          img,
-          imagePosition.x,
-          imagePosition.y,
-          imageSize.width,
-          imageSize.height,
-        );
-        ctx.restore();
-      };
-      img.src = imageData;
-    }
-
-    // Render all text blocks
-    textBlocks.forEach((block) => {
-      if (block.text && block.text.trim()) {
-        ctx.save();
-        ctx.translate(block.x, block.y);
-
-        const originalMarginLeft = PAPER_CONFIG.MARGIN_LEFT;
-        const originalMarginTop = PAPER_CONFIG.MARGIN_TOP;
-        PAPER_CONFIG.MARGIN_LEFT = 0;
-        PAPER_CONFIG.MARGIN_TOP = 0;
-        
-        renderHandwriting(ctx, block.text, {
-          font: fontName,
-          fontSize: block.fontSize || currentFontSize,
-          inkColor: block.color || currentInkColor,
-          penType,
-          messiness,
-          lineHeight,
-          inkIntensity,
-          charSpacing,
-        });
-
-        PAPER_CONFIG.MARGIN_LEFT = originalMarginLeft;
-        PAPER_CONFIG.MARGIN_TOP = originalMarginTop;
-        ctx.restore();
+      // Draw image if exists (synchronously if cached)
+      if (imageData) {
+        const img = new Image();
+        img.onload = () => {
+          ctx.save();
+          ctx.globalAlpha = 0.95;
+          ctx.drawImage(
+            img,
+            imagePosition.x,
+            imagePosition.y,
+            imageSize.width,
+            imageSize.height,
+          );
+          ctx.restore();
+        };
+        img.src = imageData;
       }
+
+      // Render all text blocks IMMEDIATELY
+      textBlocks.forEach((block) => {
+        if (block.text && block.text.trim()) {
+          ctx.save();
+          ctx.translate(block.x, block.y);
+
+          const originalMarginLeft = PAPER_CONFIG.MARGIN_LEFT;
+          const originalMarginTop = PAPER_CONFIG.MARGIN_TOP;
+          PAPER_CONFIG.MARGIN_LEFT = 0;
+          PAPER_CONFIG.MARGIN_TOP = 0;
+          
+          // Aggressively reduce messiness for performance with longer text
+          const textLength = block.text.length;
+          let optimizedMessiness = messiness;
+          if (textLength > 1000) {
+            optimizedMessiness = Math.min(messiness, 10);
+          } else if (textLength > 500) {
+            optimizedMessiness = Math.min(messiness, 15);
+          } else if (textLength > 200) {
+            optimizedMessiness = Math.min(messiness, 25);
+          }
+          
+          renderHandwriting(ctx, block.text, {
+            font: fontName,
+            fontSize: block.fontSize || currentFontSize,
+            inkColor: block.color || currentInkColor,
+            penType,
+            messiness: optimizedMessiness,
+            lineHeight,
+            inkIntensity,
+            charSpacing,
+          });
+
+          PAPER_CONFIG.MARGIN_LEFT = originalMarginLeft;
+          PAPER_CONFIG.MARGIN_TOP = originalMarginTop;
+          ctx.restore();
+        }
+      });
     });
 
-      // Cache the rendered image for potential reuse
-      canvasImageCache.current = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    }, 50); // 50ms debounce
-
-    return () => clearTimeout(timeoutId);
+    return () => cancelAnimationFrame(rafId);
   }, [
     textBlocks,
     imageData,
@@ -282,6 +328,7 @@ const EnhancedCanvas = ({
     lineHeight,
     pageSize,
     lineOpacity,
+    showMarginLine,
     currentInkColor,
     inkColor,
     getFontName,

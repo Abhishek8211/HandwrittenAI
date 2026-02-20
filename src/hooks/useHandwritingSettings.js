@@ -14,6 +14,7 @@ export const useHandwritingSettings = () => {
     lineHeight: 40, // 32 to 52
     pageSize: "A4", // A3, A4, A5, Letter, Legal
     lineOpacity: 0.6, // 0.1 to 1.0
+    showMarginLine: true, // Show/hide red margin line
   });
 
   // Memoize update function to prevent re-renders
